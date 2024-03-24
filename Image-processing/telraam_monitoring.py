@@ -29,6 +29,7 @@
 import warnings
 import numpy as np
 import cv2
+from picamera2 import Picamera2, CameraConfiguration, Controls
 import time
 import pandas as pd
 import socket
@@ -39,6 +40,7 @@ import uuid
 import json
 import requests
 import base64
+import os
 from datetime import datetime
 from math import floor
 
@@ -136,14 +138,31 @@ cam_props = {'brightness': 50, 'contrast': 15, 'saturation': 0, 'red_balance': 1
 print("Setting cam_props (2/2)...")
 for key in cam_props:  # Here we basically set all camera properties to manual, so they don't change during observing spells between data dumps
     print("... " + str(key))
-    subprocess.call(['v4l2-ctl -d /dev/video0 -c {}={}'.format(key, str(cam_props[key]))], shell=True)
+    # subprocess.call(['v4l2-ctl -d /dev/video0 -c {}={}'.format(key, str(cam_props[key]))], shell=True)
 print("... Done.")
+
+def try_mac(json_file='json/telraam_settings.json', interface='eth0'):
+    mac=None
+    if os.path.exists(json_file):
+        with open(json_file, 'r') as jf:
+            json_dat=json.load(jf)
+            mac=json_dat['mac']
+    if mac is None and interface is not None:
+        mac_if=subprocess.run(f"cat /sys/class/net/{interface}/address", shell=True, stdout=subprocess.PIPE)
+        mac=int(mac_if.stdout.replace(b':',b'').strip(b'\n'), base=16)
+    if mac is None:
+        mac=uuid.getnode()
+    print("Using mac: ", mac)
+    return mac
+        
+
+mac_id=try_mac()
 
 # Functions
 
 
 def set_exposure_time(number_of_frames):
-    global exposure_time, cap, error_msg
+    global exposure_time, cap
     if args.verbose:
         print('Adjusting exposure time:')
     average_brightness = 0
@@ -171,7 +190,14 @@ def set_exposure_time(number_of_frames):
         cap.release()  # We need to always stop and start up the video after all commands with the v4l2 driver, otherwise the update of parameters takes a few frames to materialise
         initialise_video_capture()
         for i in range(int(number_of_frames)):
-            ret, frame = cap.read()  # Get frame
+            ret=False
+            frame:np.ndarray=None
+            while not ret:
+                ret, frame = cap.read()  # Get frame
+                if not ret:
+                    print("Waiting for cam...")
+                    time.sleep(1)
+            
             frame_small = cv2.resize(frame, (X_RESIZED, Y_RESIZED), interpolation=cv2.INTER_LINEAR)
             frame_gray = cv2.cvtColor(frame_small, cv2.COLOR_BGR2GRAY)
             averages[i] = np.average(frame_gray)
@@ -185,19 +211,30 @@ def set_exposure_time(number_of_frames):
     if average_brightness < 85:
         if args.verbose:
             print('It is too dark outside, waiting for more light (empty data dump will happen)...')
-        error_msg = -1
+        return -1
     # If it is too bright outside, wait 5 minutes and try again (at the end also do a blank data dump just to tell the server we are still up and running)
     elif average_brightness > 170:
         if args.verbose:
             print('It is too bright outside, waiting for less light (empty data dump will happen)...')
-        error_msg = -2
+        return -2
     else:
-        error_msg = 0
+        return 0
 
-
+class PiCapture:
+    def __init__(self, n):
+        self.picam2 = Picamera2(n)
+        self.picam2.start()
+    def set(self,arg,param):
+        pass
+    def read(self)->tuple[bool, np.ndarray]:
+        return True, self.picam2.capture_array("main")
+    def release(self):
+        self.picam2.close()
+    
 def initialise_video_capture():
     global cap
-    cap = cv2.VideoCapture(0)
+    # cap = cv2.VideoCapture(0)
+    cap = PiCapture(0)
     cap.set(3, X_RESOLUTION)
     cap.set(4, Y_RESOLUTION)
     cap.set(5, VIDEO_FPS)
@@ -205,15 +242,15 @@ def initialise_video_capture():
 
 def background_calculation():
     global background_time, time_data_pocket_end, time_start, error_msg
-    error_msg = -9  # Fake value so the loop below can nicely execute
+    error_msg = 0  # Fake value so the loop below can nicely execute
     # Try setting the exposure time until the light conditions are suitable
-    while error_msg != 0:
-        set_exposure_time(10)
-        # If conditions are not suitable, wait five minutes then send out a data dump which will contain the error message
-        if error_msg != 0:
-            time_start = time.time()
-            time.sleep(300)
-            data_dump()
+    # while error_msg != 0:
+    #     error_msg = set_exposure_time(10)
+    #     # If conditions are not suitable, wait five minutes then send out a data dump which will contain the error message
+    #     if error_msg != 0:
+    #         time_start = time.time()
+    #         time.sleep(300)
+    #         data_dump()
     if args.verbose:
         print('Calculating background...')
     background_time_start = time.time()
@@ -543,7 +580,7 @@ def send_json_uptime(data, url=URL_UPTIME, head=HEAD_UPTIME):
 
 
 def data_dump():
-    global frame_number, number_of_contours, contour_collector, time_data_pocket_end, time_start, fps, time_data_dump
+    global frame_number, number_of_contours, contour_collector, time_data_pocket_end, time_start, fps, time_data_dump, error_msg
     time_end = time.time()
     time_data_dump = time_end
     fps = frame_number/(time_end-time_start)
@@ -598,7 +635,7 @@ def field_of_view(image):  # Define simple plotting function for field-of-view s
         return 1
     
 def check_permission_send_camera_setup_data():
-    settings_file='/home/pi/Telraam/Scripts/json/telraam_settings.json'
+    settings_file='./json/telraam_settings.json'
 
     permission=None
     try:
@@ -652,7 +689,7 @@ def send_camera_setup_data(background):
             pass
         
         data={
-                "mac": uuid.getnode(),
+                "mac": mac_id,
                 "image_format": image_type,
                 "sensor_image_version": version,
                 "send_permission": permission,
@@ -677,7 +714,7 @@ def send_camera_setup_data(background):
 
 # Here we define some aids
 
-mac_addr = uuid.getnode()  # This gets the MAC address in decimal, mac_addr = hex(uuid.getnode()).replace('0x','') would be the actual MAC address
+mac_addr = mac_id  # This gets the MAC address in decimal, mac_addr = hex(uuid.getnode()).replace('0x','') would be the actual MAC address
 hostname = mac_addr  # Use the MAC address in the data files as opposed to the  telraam ID
 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))  # Blurring kernel definition
 font = cv2.FONT_HERSHEY_SIMPLEX
@@ -698,7 +735,7 @@ initialise_contour_collector()
 
 if args.fov:
     while(True):
-        setexposuretime(10)
+        set_exposure_time(10)
         ret, frame = cap.read()
         frame_small = cv2.resize(frame, (X_RESIZED, Y_RESIZED), interpolation=cv2.INTER_LINEAR)
         frame_small = cv2.rectangle(frame_small, ((int(X_RESIZED*(AREA_EDGE_X_PERCENTAGE/100.)/2.)), (int(Y_RESIZED*(AREA_EDGE_Y_PERCENTAGE/100.)/2.))), ((X_RESIZED-int(X_RESIZED*(AREA_EDGE_X_PERCENTAGE/100.)/2.)), (Y_RESIZED-int(Y_RESIZED*(AREA_EDGE_Y_PERCENTAGE/100.)/2.))), (0, 0, 255), 2)  # Plot the buffer area on screen

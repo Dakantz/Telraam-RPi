@@ -7,7 +7,7 @@
 
 <?php 
 //mac adress and checksum
-$macAddressHex = exec('cat /sys/class/net/wlan0/address');
+$macAddressHex = exec('cat /sys/class/net/eth0/address');
 $macAddressDec = base_convert($macAddressHex, 16,10);
 $readableMACAddressDec = trim(chunk_split($macAddressDec, 4, '-'), '-');
 $convert_arr=range('A', 'Z');
