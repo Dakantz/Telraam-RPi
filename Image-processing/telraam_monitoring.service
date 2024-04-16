@@ -5,7 +5,7 @@ After=multi-user.target
 [Service]
 Type=idle
 WorkingDirectory=/home/telraam/Telraam-RPi/Image-processing
-ExecStart=/home/telraam/Telraam-RPi/venv-telraam-2/bin/python ./telraam_monitoring.py --idandtrack --verbose
+ExecStart=/home/telraam/Telraam-RPi/venv-telraam/bin/python ./telraam_monitoring.py --idandtrack --verbose
 
 [Install]
 WantedBy=multi-user.target

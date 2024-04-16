@@ -11,8 +11,8 @@ sudo apt install libopenblas-dev libatlas-base-dev python3-libcamera python3-kms
 <!-- 
 > DOES NOT WORK AS PyQT is currently broken, install using apt - picamera2 is a piece of s**t -->
 ```bash
-python3 -m venv venv-telraam
-source --system-site-packages venv-telraam/bin/activate
+python3 -m venv --system-site-packages venv-telraam
+source  venv-telraam/bin/activate
 pip install --prefer-binary -r requirements.txt
 ```
 
@@ -39,6 +39,7 @@ You can copy that ID and use it to register your device. Copy that
 sudo cp Image-processing/telraam_monitoring.service /etc/systemd/system/telraam_monitoring.service 
 sudo systemctl daemon-reload
 sudo systemctl start telraam_monitoring.service
+sudo systemctl enable telraam_monitoring.service
 #monitor
 sudo systemctl status telraam_monitoring.service
 ```
