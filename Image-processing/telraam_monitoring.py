@@ -130,6 +130,25 @@ field_rotation = args.field_rotation
 
 # Initialise manual settings on the camera
 
+def try_mac(json_file='json/telraam_settings.json', interface='eth0'):
+    mac=None
+    if os.path.exists(json_file):
+        with open(json_file, 'r') as jf:
+            json_dat=json.load(jf)
+            if 'mac' in json_dat.keys():
+                mac=json_dat['mac']
+            if 'field_rotation' in json_dat.keys():
+                field_rotation=json_dat['field_rotation']
+    if mac is None and interface is not None:
+        mac_if=subprocess.run(f"cat /sys/class/net/{interface}/address", shell=True, stdout=subprocess.PIPE)
+        mac=int(mac_if.stdout.replace(b':',b'').strip(b'\n'), base=16)
+    if mac is None:
+        mac=uuid.getnode()
+    print("Using mac: ", mac)
+    return mac
+        
+
+mac_id=try_mac()
 print("Setting cam_props (1/2)...")
 exposure_time = 100  # 100 equals to 10 ms (0.01 s = 1/100 s), also this can not be more than 1/FPS so at 60 FPS the max exposure time is ~1/60 = 0.016s -> 160, at 30 FPS it is 320.
 cam_props = {'brightness': 50, 'contrast': 15, 'saturation': 0, 'red_balance': 1500, 'blue_balance': 1400, 'sharpness': 0,
@@ -141,22 +160,6 @@ for key in cam_props:  # Here we basically set all camera properties to manual, 
     # subprocess.call(['v4l2-ctl -d /dev/video0 -c {}={}'.format(key, str(cam_props[key]))], shell=True)
 print("... Done.")
 
-def try_mac(json_file='json/telraam_settings.json', interface='eth0'):
-    mac=None
-    if os.path.exists(json_file):
-        with open(json_file, 'r') as jf:
-            json_dat=json.load(jf)
-            mac=json_dat['mac']
-    if mac is None and interface is not None:
-        mac_if=subprocess.run(f"cat /sys/class/net/{interface}/address", shell=True, stdout=subprocess.PIPE)
-        mac=int(mac_if.stdout.replace(b':',b'').strip(b'\n'), base=16)
-    if mac is None:
-        mac=uuid.getnode()
-    print("Using mac: ", mac)
-    return mac
-        
-
-mac_id=try_mac()
 
 # Functions
 
